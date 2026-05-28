@@ -1,0 +1,39 @@
+# 股票数据
+data_manager/data
+# 新闻数据
+news_manager/data
+
+# 临时文件和缓存
+__pycache__/
+.venv/
+__pycache__/
+.pytest_cache/
+.playwright-mcp/
+
+# uv 基础设施（不提交到 git）
+uv.lock
+.python-version
+
+# Claude Code 内部目录（不提交到开源版本）
+.claude/
+
+# Tushare skill + MCP (contains API tokens)
+.agents/
+skills-lock.json
+.mcp.json
+
+# 隐私文件（开源时排除）
+config.py
+CLAUDE.md
+目前工作进展.md
+
+# 生成数据（不提交源码）
+a_shares_list.csv
+etf_list.csv
+
+# 回测输出
+data_manager/backtest/log/
+
+# 冗余依赖文件（pyproject.toml 为准）
+environment.yml
+requirements.txt
