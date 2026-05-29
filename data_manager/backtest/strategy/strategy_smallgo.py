@@ -149,7 +149,7 @@ def strategy_smallgo(engine, current_date, today_data, current_positions):
             is_st = code in st_stocks ###
             is_limit_up, is_limit_down = check_limit_status(code, qfq_close, qfq_pre_close , is_st) ###
             
-            # 过滤涨停、跌停股票（昨日涨停、跌停）
+            # 过滤涨停、跌停股票（昨日涨停、跌停）注意：判断收盘后涨停、跌停 对于第二天来说相当于是昨日涨停、跌停
             #if not is_limit_up and not is_limit_down:
             target_buy_list.append(code)
                 
@@ -166,12 +166,12 @@ def strategy_smallgo(engine, current_date, today_data, current_positions):
                 qfq_close = today_qfq['qfq_close']
                 qfq_pre_close = today_qfq['qfq_pre_close']
                 
-                # 判断当前持仓股是否跌停，跌停则卖不出去，静默跳过
+                # 判断当前持仓股是否跌停，跌停则卖不出去，静默跳过。 昨日跌停，但是第二日可能不跌停，可以不跳过，除非第二天开盘价为跌停则卖不出去。但是这里默认是不知道第二天的开盘价，所以这里可去掉判断跌停过滤
                 is_st = code in st_stocks
                 is_up, is_down = check_limit_status(code, qfq_close, qfq_pre_close , is_st)
                 
                 # 停牌也静默跳过
-                if is_down or (code in suspended_stocks):
+                if  (code in suspended_stocks):
                     continue
                     
             orders.append({'code': code, 'action': 'sell'})

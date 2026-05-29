@@ -31,7 +31,7 @@ def strategy(engine, current_date, today_data, current_positions) -> list[dict]:
 |-----------|------|-------------|
 | `engine` | MultiBacktestEngine | 可访问 `.benchmark_df`、`.get_history_qfq()`、`.dates` |
 | `current_date` | str | "YYYYMMDD"，当天收盘日期（收盘后决策） |
-| `today_data` | DataFrame | 按 ts_code 索引，约 160 列（全部 BACKTEST_BASE 字段，含 bfq 和 qfq 指标） |
+| `today_data` | DataFrame | 按 ts_code 索引，约 160 列（全部 BACKTEST_BASE/BACKTEST_ETF_BASE 字段，仅含 bfq 指标） |
 | `current_positions` | dict | `{ts_code: shares}` — 当前持仓 |
 
 ### 订单格式
@@ -96,23 +96,6 @@ def strategy(engine, current_date, today_data, current_positions) -> list[dict]:
 
 **多输出指标**: `asi_qfq`/`asit_qfq`, `brar_ar_qfq`/`brar_br_qfq`, `dmi_adx_qfq`/`dmi_adxr_qfq`/`dmi_mdi_qfq`/`dmi_pdi_qfq`, `dfma_dif_qfq`/`dfma_difma_qfq`, `dpo_qfq`/`madpo_qfq`, `emv_qfq`/`maemv_qfq`, `expma_12_qfq`/`expma_50_qfq`, `ktn_upper_qfq`/`ktn_mid_qfq`/`ktn_down_qfq`, `mass_qfq`/`ma_mass_qfq`, `mtm_qfq`/`mtmma_qfq`, `roc_qfq`/`maroc_qfq`, `taq_up_qfq`/`taq_mid_qfq`/`taq_down_qfq`, `trix_qfq`/`trma_qfq`, `xsii_td1_qfq`~`xsii_td4_qfq`
 
-### 技术指标（bfq — 不复权，仅限单只股票时间序列分析）
-
-**bfq 列严禁用于横截面对比（排名、打分、选股）**。bfq（不复权）以各股自身当前日为锚点做价格调整，每只股票的复权基准不同，因此 bfq 指标值在横截面上不可直接比较。bfq 唯一合法用途：单只股票的时间序列分析（如判断个股自身趋势转向）。
-
-**趋势类 (MA/EMA)**: `ma_bfq_5`, `ma_bfq_10`, `ma_bfq_20`, `ma_bfq_30`, `ma_bfq_60`, `ma_bfq_90`, `ma_bfq_250`, `ema_bfq_5` .. `ema_bfq_250`（相同周期）
-
-**MACD**: `macd_dif_bfq`, `macd_dea_bfq`, `macd_bfq`
-
-**KDJ**: `kdj_k_bfq`, `kdj_d_bfq`, `kdj_bfq`
-
-**RSI**: `rsi_bfq_6`, `rsi_bfq_12`, `rsi_bfq_24`
-
-**布林带**: `boll_upper_bfq`, `boll_mid_bfq`, `boll_lower_bfq`
-
-**单值指标**: `cci_bfq`, `atr_bfq`, `bbi_bfq`, `bias1_bfq`, `bias2_bfq`, `bias3_bfq`, `cr_bfq`, `wr_bfq`, `wr1_bfq`, `obv_bfq`, `mfi_bfq`, `vr_bfq`, `psy_bfq`, `psyma_bfq`
-
-**多输出指标**: `asi_bfq`/`asit_bfq`, `brar_ar_bfq`/`brar_br_bfq`, `dmi_adx_bfq`/`dmi_adxr_bfq`/`dmi_mdi_bfq`/`dmi_pdi_bfq`, `dfma_dif_bfq`/`dfma_difma_bfq`, `dpo_bfq`/`madpo_bfq`, `emv_bfq`/`maemv_bfq`, `expma_12_bfq`/`expma_50_bfq`, `ktn_upper_bfq`/`ktn_mid_bfq`/`ktn_down_bfq`, `mass_bfq`/`ma_mass_bfq`, `mtm_bfq`/`mtmma_bfq`, `roc_bfq`/`maroc_bfq`, `taq_up_bfq`/`taq_mid_bfq`/`taq_down_bfq`, `trix_bfq`/`trma_bfq`, `xsii_td1_bfq`~`xsii_td4_bfq`
 
 > **要点**: 换手率、市值、PE 等非价格衍生指标不受复权方式影响，原名使用。价格衍生指标（bias1、MA、RSI、MACD 等）的横截面对比必须用 qfq 列。止损/涨跌停等涉及绝对价格阈值的判断必须使用 `engine.get_history_qfq()`。
 
@@ -124,6 +107,7 @@ def strategy(engine, current_date, today_data, current_positions) -> list[dict]:
 | 未实现指标 (9个) | bfq 列可用 | 填 NaN |
 
 **9 个未实现（ETF 不可用）**: OBV, ASI, MFI, DMI, BRAR, PSY, VR, MASS, EMV
+**除了技术指标外，ETF 仅有价格与成交量（日频）`open`, `high`, `low`, `close`, `change`, `pct_chg`, `vol`, `amount`可用**
 
 ## 辅助方法
 
@@ -301,9 +285,9 @@ def strategy(engine, date, today_data, positions):
 
 ## 常见陷阱
 
-1. **ts_code 格式**: 引擎可能使用纯数字（"000001"）或完整代码（"000001.SZ"）。检查 `today_data.index`——如果首个条目无后缀，则需从所有 Tushare 结果中去除 `.SZ`/`.SH`。
+1. **ts_code 格式**: 引擎使用纯数字（"000001"）。需从所有 Tushare 结果中去除 `.SZ`/`.SH`。
 
-2. **横截面打分必须用 QFQ 列**: `today_data` 中的 `_qfq` 列（前复权）以统一的最新日为锚点，各股指标在同一基准下可横比。`_bfq` 列（不复权）以各股自身当前日为锚点，复权基准不同，**严禁用于横截面对比**（排名、打分、选股）。止损/涨跌停等涉及绝对价格阈值的判断必须使用 `engine.get_history_qfq()`。换手率、市值、PE 等非价格衍生指标不受复权方式影响。
+2. **横截面打分必须用 QFQ 列**:  `_qfq` 列（前复权）需从engine.get_history_qfq()来调取，以回测的当前最新日为锚点，各股指标在同一基准下可横比。`_bfq` 列（不复权）仅存储，**严禁用于横截面对比**（排名、打分、选股）。止损/涨跌停等涉及绝对价格阈值的判断必须使用 `engine.get_history_qfq()`。换手率、市值、PE 等非价格衍生指标不受复权方式影响。
 
 3. **涨停/跌停判断**: 必须使用 `engine.get_history_qfq()` 获取准确的 qfq_pre_close 来计算涨跌停价。`today_data` 有 `pct_chg` 但涨跌停价的计算精度不同。
 
@@ -320,6 +304,8 @@ def strategy(engine, date, today_data, positions):
 9. **A 股因子特征**: A 股散户主导，短周期呈均值回归特征。反转因子（-bias1、低 RSI）和低换手因子产生正 alpha；趋势/动量因子（正 bias1、MA 交叉）产生负 alpha。
 
 ## Tushare API 速查
+
+推荐使用Tushare的skills库来查阅。
 
 ```python
 from config import get_pro
