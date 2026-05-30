@@ -177,7 +177,10 @@ Agent 在编写策略时自动遵守以下规则：
 
 详细参考：
 - 策略 API：`data_manager/backtest/strategy/STRATEGY_MANUAL.md`
-- AI 可读项目说明：`readme_ai.md`
+- AI 可读项目说明：`readme_ai.md` 
+
+### 展示一个由 Agent 编写并迭代的策略回测结果：
+![alt text](image.png)
 
 ---
 
