@@ -5,6 +5,8 @@ description = "Add your description here"
 requires-python = ">=3.12"
 dependencies = [
     "beautifulsoup4>=4.14.3",
+    "efinance>=0.5.8",
+    "openai>=2.40.0",
     "pandas>=3.0.2",
     "playwright>=1.58.0",
     "requests>=2.33.1",

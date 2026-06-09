@@ -9,6 +9,10 @@ __pycache__/
 __pycache__/
 .pytest_cache/
 .playwright-mcp/
+output/
+debug_*.txt
+debug_*.json
+test_*.py
 
 # uv 基础设施（不提交到 git）
 uv.lock
@@ -37,3 +41,8 @@ data_manager/backtest/log/
 # 冗余依赖文件（pyproject.toml 为准）
 environment.yml
 requirements.txt
+
+# 预测输出
+predict/
+
+test.*

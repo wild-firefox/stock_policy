@@ -12,7 +12,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 # ============ API Token 配置 ============
 TUSHARE_TOKEN = os.environ.get("TUSHARE_TOKEN", "YOUR_TUSHARE_TOKEN")
 BOCHA_API_KEY = os.environ.get("BOCHA_API_KEY", "YOUR_BOCHA_API_KEY")
-
+DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "YOUR_DEEPSEEK_API_KEY")
 
 # ============ 统一全局数据存储路径 ============
 DATA_DIR = PROJECT_ROOT / "data_manager" / "data"
