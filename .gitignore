@@ -6,20 +6,31 @@ news_manager/data
 # 临时文件和缓存
 __pycache__/
 .venv/
+.uv-python/
 __pycache__/
 .pytest_cache/
+.pytest-tmp/
+.codex-pytest-*/
+.uv-cache/
 .playwright-mcp/
 output/
 debug_*.txt
 debug_*.json
+test_failures*.log
 test_*.py
+!test/test_*.py
+# 依赖本地未公开 notebook 的研究测试
+test/test_etf_diversification_notebook.py
+# 旧版窗口控件模板，当前业务已改为直接最小化
+test_template_window_controls_*.png
+scratch/
+data_manager/backtest/strategy
+stats.txt
 
-# uv 基础设施（不提交到 git）
-uv.lock
-.python-version
-
-# Claude Code 内部目录（不提交到开源版本）
+# Claude/Codex 本地记忆与运行配置不进入公开发布。
+# 主分支中已经跟踪的历史文件不受该规则影响。
 .claude/
+.codex/
 
 # Tushare skill + MCP (contains API tokens)
 .agents/
@@ -28,8 +39,15 @@ skills-lock.json
 
 # 隐私文件（开源时排除）
 config.py
-CLAUDE.md
 目前工作进展.md
+
+# 私域数据
+private_data/data/*
+debug_ocr_boundaries.png
+debug_ocr_top_crop.png
+my_positions.json
+trade
+
 
 # 生成数据（不提交源码）
 a_shares_list.csv
@@ -38,11 +56,11 @@ etf_list.csv
 # 回测输出
 data_manager/backtest/log/
 
-# 冗余依赖文件（pyproject.toml 为准）
+# 冗余依赖文件（uv.lock .python-version pyproject.toml 为准）
 environment.yml
 requirements.txt
 
 # 预测输出
 predict/
 
-test.*
+*.ipynb

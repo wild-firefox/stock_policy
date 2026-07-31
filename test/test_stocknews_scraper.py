@@ -1,6 +1,22 @@
 """Tests for stocknews_scraper.py — parser logic and utilities."""
 
-from news_manager.stocknews_scraper import parse_listing_to_markdown, parse_article_to_markdown, sanitize_filename
+import asyncio
+from datetime import datetime
+
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError
+
+from news_manager.stocknews_scraper import (
+    _open_listing_page,
+    GENERIC_EXTRACT_JS,
+    article_file_needs_refresh,
+    ensure_listing_identity,
+    normalize_modern_listing_item,
+    needs_dynamic_table_wait,
+    parse_article_to_markdown,
+    parse_listing_to_markdown,
+    sanitize_filename,
+    should_skip_article_detail,
+)
 
 
 class TestSanitizeFilename:
@@ -12,7 +28,126 @@ class TestSanitizeFilename:
         assert ":" not in result
 
 
+class TestArticleFetchPolicy:
+    def test_announcement_type_skips_detail_navigation(self):
+        item = {
+            "type": "announcement",
+            "url": "http://news.10jqka.com.cn/field/sn/20260622/58598955.shtml?ts=3&qs=3",
+        }
+        assert should_skip_article_detail(item) is True
+
+    def test_announcement_url_skips_even_without_type(self):
+        item = {
+            "type": "news",
+            "url": "http://news.10jqka.com.cn/field/sn/20260622/58598955.shtml",
+        }
+        assert should_skip_article_detail(item) is True
+
+    def test_regular_news_still_fetches(self):
+        item = {
+            "type": "news",
+            "url": "http://news.10jqka.com.cn/field/20260623/677629993.shtml",
+        }
+        assert should_skip_article_detail(item) is False
+
+    def test_margin_financing_title_waits_for_dynamic_table(self):
+        assert needs_dynamic_table_wait("贵州茅台：6月22日获融资买入6.16亿元") is True
+        assert needs_dynamic_table_wait("贵州茅台发布年度报告") is False
+
+    def test_generic_extractor_recurses_into_sections(self):
+        assert "['ARTICLE','SECTION','BLOCKQUOTE','UL','OL']" in GENERIC_EXTRACT_JS
+        assert "tag === 'P' || /^H[1-6]$/.test(tag) || tag === 'SECTION'" not in GENERIC_EXTRACT_JS
+
+    def test_generic_extractor_recurses_into_paragraphs_that_wrap_tables(self):
+        assert "tag === 'P' && child.querySelector('table')" in GENERIC_EXTRACT_JS
+
+    def test_incomplete_financing_article_is_refetched(self, tmp_path):
+        article = tmp_path / "融资文章.md"
+        article.write_text("正文\n\n加载中...\n", encoding="utf-8")
+        assert article_file_needs_refresh(article, "贵州茅台获融资买入6.16亿元") is True
+
+        article.write_text("正文已有数据但没有表格", encoding="utf-8")
+        assert article_file_needs_refresh(article, "贵州茅台获融资买入6.16亿元") is True
+
+        article.write_text("| 交易日期 | 融资买入额 |\n|---|---|", encoding="utf-8")
+        assert article_file_needs_refresh(article, "贵州茅台获融资买入6.16亿元") is False
+
+    def test_regular_existing_article_is_not_refetched(self, tmp_path):
+        article = tmp_path / "普通文章.md"
+        article.write_text("普通新闻正文", encoding="utf-8")
+        assert article_file_needs_refresh(article, "贵州茅台发布年度报告") is False
+
+
 class TestParseListingToMarkdown:
+    def test_modern_news_tab_item_keeps_legacy_listing_template(self):
+        item = normalize_modern_listing_item(
+            [
+                "工业富联：6月24日获融资买入15.27亿元",
+                "同花顺iNews",
+                "3小时前",
+            ],
+            "https://news.10jqka.com.cn/20260625/c677694777.shtml",
+            "news",
+            today=datetime(2026, 6, 25),
+        )
+        data = ensure_listing_identity(
+            {
+                "stockName": "工业富联",
+                "stockCode": "601138",
+                "sections": [{"title": "热点新闻", "items": [item]}],
+            },
+            "601138",
+            "工业富联(601138)个股资讯查询_个股行情_同花顺财经",
+        )
+
+        md = parse_listing_to_markdown(data)
+
+        assert "# 工业富联（601138）新闻公告" in md
+        assert "## 热点新闻" in md
+        assert "`06/25` [工业富联：6月24日获融资买入15.27亿元]" in md
+        assert "https://news.10jqka.com.cn/20260625/c677694777.shtml" in md
+
+    def test_modern_announcement_and_report_dates_are_normalized(self):
+        announcement = normalize_modern_listing_item(
+            [
+                "工业富联：富士康工业互联网股份有限公司董事会决议公告",
+                "证券代码：601138 富士康工业互联网股份有限公司",
+                "2026-06-19",
+            ],
+            "http://news.10jqka.com.cn/field/sn/20260619/58578285.shtml",
+            "announcement",
+            today=datetime(2026, 6, 25),
+        )
+        report = normalize_modern_listing_item(
+            ["AI服务器销售占比提升", "金元证券", "2026-06-15"],
+            "http://news.10jqka.com.cn/field/sr/20260617/58566465.shtml",
+            "report",
+            today=datetime(2026, 6, 25),
+        )
+
+        assert announcement == {
+            "date": "06/19",
+            "title": "工业富联：富士康工业互联网股份有限公司董事会决议公告",
+            "url": "http://news.10jqka.com.cn/field/sn/20260619/58578285.shtml",
+            "type": "announcement",
+        }
+        assert report == {
+            "date": "06/15",
+            "title": "AI服务器销售占比提升",
+            "url": "http://news.10jqka.com.cn/field/sr/20260617/58566465.shtml",
+            "type": "report",
+        }
+
+    def test_empty_stock_code_falls_back_to_requested_code_and_title(self):
+        data = ensure_listing_identity(
+            {"stockName": "", "stockCode": "", "sections": []},
+            "601138",
+            "工业富联(601138)个股资讯查询_个股行情_同花顺财经",
+        )
+
+        assert data["stockName"] == "工业富联"
+        assert data["stockCode"] == "601138"
+
     def test_empty_data(self):
         data = {"stockName": "测试", "stockCode": "000001", "sections": []}
         md = parse_listing_to_markdown(data)
@@ -116,6 +251,46 @@ class TestParseArticleToMarkdown:
         assert "| A | B |" in md
         assert "| 1 | 2 |" in md
 
+    def test_loading_placeholder_removed_and_table_kept(self):
+        data = {
+            "title": "融资买入",
+            "time": "",
+            "source": "",
+            "stocks": [],
+            "elements": [
+                {"type": "p", "text": "加载中..."},
+                {
+                    "type": "table",
+                    "rows": [
+                        ["交易日期", "融资买入额", "融资余额"],
+                        ["2026-06-22", "6.16亿", "199.19亿"],
+                    ],
+                },
+            ],
+        }
+        md = parse_article_to_markdown(data)
+        assert "加载中" not in md
+        assert "| 交易日期 | 融资买入额 | 融资余额 |" in md
+        assert "| 2026-06-22 | 6.16亿 | 199.19亿 |" in md
+
+    def test_duplicate_dynamic_tables_render_once(self):
+        rows = [
+            ["交易日期", "融资买入额"],
+            ["2026-06-22", "6.16亿"],
+        ]
+        data = {
+            "title": "融资买入",
+            "time": "",
+            "source": "",
+            "stocks": [],
+            "elements": [
+                {"type": "table", "rows": rows},
+                {"type": "table", "rows": rows},
+            ],
+        }
+        md = parse_article_to_markdown(data)
+        assert md.count("| 交易日期 | 融资买入额 |") == 1
+
     def test_article_with_images(self):
         data = {
             "title": "测试", "time": "", "source": "", "stocks": [],
@@ -155,3 +330,45 @@ class TestParseArticleToMarkdown:
         # Only the downloaded image shows, external hotlink is skipped
         assert "![](images/local.jpg)" in md
         assert "mmbiz.qpic.cn" not in md
+
+
+class FakeListingPage:
+    def __init__(self, goto_error=None, ready_error=None):
+        self.goto_error = goto_error
+        self.ready_error = ready_error
+        self.goto_calls = []
+        self.ready_calls = []
+
+    async def goto(self, url, **kwargs):
+        self.goto_calls.append((url, kwargs))
+        if self.goto_error:
+            raise self.goto_error
+
+    async def wait_for_function(self, expression, **kwargs):
+        self.ready_calls.append((expression, kwargs))
+        if self.ready_error:
+            raise self.ready_error
+
+
+class TestListingNavigation:
+    def test_waits_for_dom_and_listing_content(self):
+        page = FakeListingPage()
+
+        asyncio.run(_open_listing_page(page, "https://example.com/news/"))
+
+        assert page.goto_calls == [(
+            "https://example.com/news/",
+            {"wait_until": "domcontentloaded", "timeout": 30000},
+        )]
+        assert len(page.ready_calls) == 1
+        assert "querySelectorAll('button')" in page.ready_calls[0][0]
+        assert page.ready_calls[0][1] == {"timeout": 15000}
+
+    def test_continues_when_navigation_timeout_has_loaded_dom(self):
+        page = FakeListingPage(
+            goto_error=PlaywrightTimeoutError("navigation timed out")
+        )
+
+        asyncio.run(_open_listing_page(page, "https://example.com/news/"))
+
+        assert len(page.ready_calls) == 1

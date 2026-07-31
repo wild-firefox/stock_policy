@@ -6,6 +6,7 @@ import hashlib
 import os
 import re
 import sys
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -13,6 +14,43 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import NEWS_RAW_DIR
 
 OUTPUT_BASE = NEWS_RAW_DIR
+
+ANNOUNCEMENT_URL_RE = re.compile(r"/(?:field/)?sn/", re.IGNORECASE)
+DYNAMIC_TABLE_TITLE_RE = re.compile(r"融资|融券|两融")
+LOADING_PLACEHOLDER_RE = re.compile(r"^加载中[.。…·]*$")
+MODERN_TAB_CONFIG = (
+    ("news", "热点新闻", "新闻"),
+    ("announcement", "公司公告", "公告"),
+    ("report", "相关研报", "研报"),
+)
+
+DYNAMIC_TABLE_READY_JS = r"""() => {
+    const root = document.querySelector('.article-content, .news-content, article, #content');
+    if (!root) return false;
+
+    const hasVisibleDataTable = Array.from(root.querySelectorAll('table')).some(table => {
+        const style = window.getComputedStyle(table);
+        const visible = style.display !== 'none' && style.visibility !== 'hidden' &&
+            table.getClientRects().length > 0;
+        return visible && table.querySelectorAll('tr').length >= 2;
+    });
+
+    const hasLoadingPlaceholder = Array.from(root.querySelectorAll('*')).some(el =>
+        /^加载中[.。…·]*$/.test((el.innerText || '').trim())
+    );
+
+    return hasVisibleDataTable && !hasLoadingPlaceholder;
+}"""
+
+LISTING_READY_JS = r"""() => {
+    if (document.querySelector('a[href*="/field/"], a[href*="/sn/"], a[href*="/sr/"]')) {
+        return true;
+    }
+    const buttonTexts = new Set(Array.from(document.querySelectorAll('button')).map(button =>
+        (button.innerText || button.textContent || '').trim()
+    ));
+    return ['\u65b0\u95fb', '\u516c\u544a', '\u7814\u62a5'].every(label => buttonTexts.has(label));
+}"""
 
 EXTRACT_LISTING_JS = r"""(() => {
     const result = { stockName: '', stockCode: '', sections: [], totalItems: 0 };
@@ -83,6 +121,45 @@ EXTRACT_LISTING_JS = r"""(() => {
 
     return result;
 })()"""
+
+MODERN_TAB_BUTTON_RECT_JS = r"""(label) => {
+    const buttons = Array.from(document.querySelectorAll('button'));
+    const button = buttons.find(b => (b.innerText || b.textContent || '').trim() === label);
+    if (!button) return null;
+    const rect = button.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return null;
+    return {
+        x: Math.round(rect.x),
+        y: Math.round(rect.y),
+        w: Math.round(rect.width),
+        h: Math.round(rect.height),
+        active: button.getAttribute('data-state') === 'active',
+    };
+}"""
+
+MODERN_ACTIVE_TAB_LINKS_JS = r"""() => {
+    const newline = String.fromCharCode(10);
+    const links = Array.from(document.querySelectorAll('a'));
+    return links.map(a => {
+        const rect = a.getBoundingClientRect();
+        const text = (a.innerText || '').trim();
+        const lines = text.split(newline).map(s => s.trim()).filter(Boolean);
+        return {
+            href: a.href || '',
+            lines,
+            y: Math.round(rect.y),
+            w: Math.round(rect.width),
+            h: Math.round(rect.height),
+        };
+    }).filter(item =>
+        item.href &&
+        item.lines.length > 0 &&
+        item.y >= 140 &&
+        item.w > 0 &&
+        item.h > 0 &&
+        item.href.includes('10jqka.com.cn')
+    );
+}"""
 
 EXTRACT_ARTICLE_JS = r"""(() => {
     const result = { title: '', time: '', source: '', paragraphs: [], stocks: [] };
@@ -187,12 +264,15 @@ GENERIC_EXTRACT_JS = r"""(() => {
         return true;
     }
 
+    const tableSeen = new Set();
+
     function walk(el, out) {
         for (const child of el.children) {
             const tag = child.tagName;
             const text = (child.innerText || '').trim();
             if (['STYLE','SCRIPT','NOSCRIPT'].includes(tag)) continue;
-            if (child.style.display === 'none' || child.style.visibility === 'hidden') continue;
+            const style = window.getComputedStyle(child);
+            if (style.display === 'none' || style.visibility === 'hidden') continue;
             const cls = (child.className || '') + ' ' + (child.id || '');
             if (/\b(nav|footer|sidebar|header|copyright|banner)\b/i.test(cls)) continue;
 
@@ -207,14 +287,22 @@ GENERIC_EXTRACT_JS = r"""(() => {
                         cells.push(td.innerText.trim().replace(/\n/g, ' ')));
                     if (cells.length > 0) rows.push(cells);
                 });
-                if (rows.length >= 2) out.push({ type: 'table', rows });
-            } else if (tag === 'P' || /^H[1-6]$/.test(tag) || tag === 'SECTION') {
+                const signature = JSON.stringify(rows);
+                if (rows.length >= 2 && !tableSeen.has(signature)) {
+                    tableSeen.add(signature);
+                    out.push({ type: 'table', rows });
+                }
+            } else if (tag === 'P' && child.querySelector('table')) {
+                // Some 10jqka dynamic widgets place DIV/TABLE trees inside P.
+                // Preserve the table structure instead of flattening innerText.
+                walk(child, out);
+            } else if (tag === 'P' || /^H[1-6]$/.test(tag)) {
                 // Extract images first — they can appear even without text
                 child.querySelectorAll('img').forEach(img => {
                     const src = img.src || img.getAttribute('data-src') || img.getAttribute('data-original') || '';
                     if (isDataImage(src)) out.push({ type: 'image', src });
                 });
-                if (text.length > 0) {
+                if (text.length > 0 && !/^加载中[.。…·]*$/.test(text)) {
                     if (/^(相关|推荐|热门|精彩)(阅读|文章|推荐|内容)/.test(text)) break;
                     out.push({ type: 'paragraph', text });
                 }
@@ -224,7 +312,7 @@ GENERIC_EXTRACT_JS = r"""(() => {
                 const hasBlockChild = Array.from(child.children).some(c => blockTags.includes(c.tagName));
                 if (hasBlockChild) {
                     walk(child, out);
-                } else if (text.length > 0) {
+                } else if (text.length > 0 && !/^加载中[.。…·]*$/.test(text)) {
                     child.querySelectorAll('img').forEach(img => {
                         const src = img.src || img.getAttribute('data-src') || img.getAttribute('data-original') || '';
                         if (isDataImage(src)) out.push({ type: 'image', src });
@@ -232,7 +320,7 @@ GENERIC_EXTRACT_JS = r"""(() => {
                     if (/^(相关|推荐|热门|精彩)(阅读|文章|推荐|内容)/.test(text)) break;
                     out.push({ type: 'paragraph', text });
                 }
-            } else if (['ARTICLE','BLOCKQUOTE','UL','OL'].includes(tag)) {
+            } else if (['ARTICLE','SECTION','BLOCKQUOTE','UL','OL'].includes(tag)) {
                 walk(child, out);
             }
         }
@@ -267,7 +355,8 @@ GENERIC_EXTRACT_JS = r"""(() => {
         const text = (root.innerText || '').trim();
         text.split(/\n+/).forEach(line => {
             const t = line.trim();
-            if (t.length > 10 && !/版权所有|ICP|备案号|禁止发表|我有话说/.test(t)) {
+            if (t.length > 10 && !/^加载中[.。…·]*$/.test(t) &&
+                !/版权所有|ICP|备案号|禁止发表|我有话说/.test(t)) {
                 result.elements.push({ type: 'p', text: t });
             }
         });
@@ -279,6 +368,42 @@ GENERIC_EXTRACT_JS = r"""(() => {
 
 def sanitize_filename(name):
     return re.sub(r'[\\/:*?"<>|]', '_', name)
+
+
+def should_skip_article_detail(item):
+    """Return True when a listing item should not open a detail page."""
+    url = str(item.get('url', ''))
+    return item.get('type') == 'announcement' or bool(ANNOUNCEMENT_URL_RE.search(url))
+
+
+def needs_dynamic_table_wait(title):
+    """Return True for financing/margin articles whose tables render asynchronously."""
+    return bool(DYNAMIC_TABLE_TITLE_RE.search(str(title or '')))
+
+
+def article_file_needs_refresh(file_path, title):
+    """Return True when a cached financing article is incomplete or flattened."""
+    if not needs_dynamic_table_wait(title):
+        return False
+    try:
+        content = Path(file_path).read_text(encoding='utf-8')
+    except OSError:
+        return True
+    return '加载中' in content or '|---|' not in content
+
+
+def _is_loading_placeholder(text):
+    return bool(LOADING_PLACEHOLDER_RE.fullmatch(str(text or '').strip()))
+
+
+async def _wait_for_dynamic_table(page, title, timeout=30000):
+    """Wait for visible financing table rows and removal of loading placeholders."""
+    if not needs_dynamic_table_wait(title):
+        return
+    try:
+        await page.wait_for_function(DYNAMIC_TABLE_READY_JS, timeout=timeout)
+    except Exception:
+        print(f"[scrape] Dynamic table wait timed out: {str(title)[:30]}")
 
 
 def parse_mmdd_to_date(mmdd, today):
@@ -303,6 +428,162 @@ def business_days_cutoff(today, days):
             count += 1
         current = current - timedelta(days=1)
     return current + timedelta(days=1)
+
+
+def ensure_listing_identity(data, fallback_stock_code, page_title=""):
+    """Ensure listing data has stock name/code even when the modern page has no h1."""
+    result = dict(data or {})
+    title_match = re.search(r"(.+?)\((\d{6})\)", page_title or "")
+
+    if not result.get("stockCode"):
+        result["stockCode"] = str(fallback_stock_code or "")
+    if not result.get("stockCode") and title_match:
+        result["stockCode"] = title_match.group(2)
+
+    if not result.get("stockName") and title_match:
+        result["stockName"] = title_match.group(1).strip()
+    if not result.get("stockName"):
+        result["stockName"] = ""
+
+    result.setdefault("sections", [])
+    result["totalItems"] = sum(len(s.get("items", [])) for s in result.get("sections", []))
+    return result
+
+
+def listing_has_items(data):
+    """Return True when the listing contains at least one item."""
+    return any(section.get("items") for section in (data or {}).get("sections", []))
+
+
+async def _open_listing_page(page, url):
+    """打开列表页并等待新闻内容出现，忽略页面持续存在的后台请求。"""
+    from playwright.async_api import TimeoutError as PlaywrightTimeoutError
+
+    try:
+        await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+    except PlaywrightTimeoutError:
+        print("[scrape] Listing navigation timed out; checking loaded DOM")
+
+    try:
+        await page.wait_for_function(LISTING_READY_JS, timeout=15000)
+    except PlaywrightTimeoutError:
+        print("[scrape] Listing content wait timed out; attempting extraction")
+
+
+def _format_mmdd(month, day):
+    return f"{int(month):02d}/{int(day):02d}"
+
+
+def normalize_modern_listing_date(text, today=None):
+    """Normalize modern 10jqka date text to MM/DD."""
+    today = today or datetime.now()
+    if not isinstance(today, datetime):
+        today = datetime.combine(today, datetime.min.time())
+
+    text = str(text or "").strip()
+    if not text:
+        return ""
+
+    full = re.search(r"(\d{4})-(\d{1,2})-(\d{1,2})", text)
+    if full:
+        return _format_mmdd(full.group(2), full.group(3))
+
+    short = re.search(r"(\d{1,2})-(\d{1,2})", text)
+    if short:
+        return _format_mmdd(short.group(1), short.group(2))
+
+    slash = re.search(r"(\d{1,2})/(\d{1,2})", text)
+    if slash:
+        return _format_mmdd(slash.group(1), slash.group(2))
+
+    if "昨天" in text:
+        target = today - timedelta(days=1)
+        return target.strftime("%m/%d")
+
+    if any(token in text for token in ("分钟前", "小时前", "刚刚")):
+        return today.strftime("%m/%d")
+
+    return ""
+
+
+def _date_from_url(url):
+    m = re.search(r"/(\d{4})(\d{2})(\d{2})/", str(url or ""))
+    if not m:
+        return ""
+    return f"{m.group(2)}/{m.group(3)}"
+
+
+def normalize_modern_listing_item(lines, href, item_type, today=None):
+    """Convert modern tab link text lines to the legacy listing item shape."""
+    clean_lines = [str(line).strip() for line in (lines or []) if str(line).strip()]
+    title = clean_lines[0] if clean_lines else ""
+    date = ""
+    for line in reversed(clean_lines):
+        date = normalize_modern_listing_date(line, today)
+        if date:
+            break
+    if not date:
+        date = _date_from_url(href)
+    return {
+        "date": date,
+        "title": title,
+        "url": href,
+        "type": item_type,
+    }
+
+
+async def _click_modern_tab(page, label):
+    rect = await page.evaluate(MODERN_TAB_BUTTON_RECT_JS, label)
+    if not rect:
+        return False
+    if not rect.get("active"):
+        await page.mouse.click(rect["x"] + rect["w"] / 2, rect["y"] + rect["h"] / 2)
+        await page.wait_for_timeout(1200)
+    return True
+
+
+def _modern_item_matches_tab(item_type, href):
+    href = str(href or "")
+    if item_type == "announcement":
+        return "/sn/" in href
+    if item_type == "report":
+        return "/sr/" in href
+    return "/sn/" not in href and "/sr/" not in href
+
+
+async def extract_modern_listing(page, stock_code, today=None):
+    """Extract the modern React tabbed 10jqka stock news page."""
+    page_title = await page.title()
+    data = ensure_listing_identity(
+        {"stockName": "", "stockCode": stock_code, "sections": [], "totalItems": 0},
+        stock_code,
+        page_title,
+    )
+    today = today or datetime.now()
+
+    for item_type, section_title, label in MODERN_TAB_CONFIG:
+        clicked = await _click_modern_tab(page, label)
+        if not clicked:
+            continue
+
+        raw_items = await page.evaluate(MODERN_ACTIVE_TAB_LINKS_JS)
+        items = []
+        seen = set()
+        for raw in raw_items:
+            href = raw.get("href", "")
+            if href in seen or not _modern_item_matches_tab(item_type, href):
+                continue
+            item = normalize_modern_listing_item(raw.get("lines", []), href, item_type, today)
+            if not item["title"]:
+                continue
+            seen.add(href)
+            items.append(item)
+
+        if items:
+            data["sections"].append({"title": section_title, "items": items})
+
+    data["totalItems"] = sum(len(s.get("items", [])) for s in data["sections"])
+    return data
 
 
 def parse_listing_to_markdown(data, local_articles=None):
@@ -389,8 +670,11 @@ def parse_article_to_markdown(data, image_map=None):
     lines.append("### 正文")
     lines.append("")
 
+    rendered_tables = set()
     for el in elements:
         if el['type'] == 'p':
+            if _is_loading_placeholder(el.get('text', '')):
+                continue
             lines.append(el['text'])
             lines.append("")
         elif el['type'] == 'image':
@@ -399,7 +683,12 @@ def parse_article_to_markdown(data, image_map=None):
                 lines.append(f"![]({image_map[src]})")
                 lines.append("")
         elif el['type'] == 'table':
-            lines.extend(_render_table(el['rows']))
+            rows = el.get('rows', [])
+            signature = tuple(tuple(str(cell) for cell in row) for row in rows)
+            if not rows or signature in rendered_tables:
+                continue
+            rendered_tables.add(signature)
+            lines.extend(_render_table(rows))
             lines.append("")
 
     lines.append("---")
@@ -440,12 +729,20 @@ async def scrape_listing(stock_code, output_dir=None, fetch_articles=True, fetch
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         page = await browser.new_page()
-        await page.goto(url, wait_until="networkidle", timeout=30000)
+        await _open_listing_page(page, url)
 
         data = await page.evaluate(EXTRACT_LISTING_JS)
+        data = ensure_listing_identity(data, stock_code, await page.title())
+        if not listing_has_items(data):
+            data = await extract_modern_listing(page, stock_code, today)
 
         if not data or data.get("error"):
             print(f"[scrape] Error: {data.get('error', 'unknown')}")
+            await browser.close()
+            return None
+
+        if not listing_has_items(data):
+            print(f"[scrape] Error: no listing items found for {stock_code}")
             await browser.close()
             return None
 
@@ -461,6 +758,7 @@ async def scrape_listing(stock_code, output_dir=None, fetch_articles=True, fetch
             articles_dir.mkdir(parents=True, exist_ok=True)
             fetched = 0
             skipped = 0
+            skipped_announcements = 0
 
             for section in data.get('sections', []):
                 for item in section.get('items', []):
@@ -471,13 +769,23 @@ async def scrape_listing(stock_code, output_dir=None, fetch_articles=True, fetch
                     if item_date is None or item_date < cutoff.date():
                         continue
 
+                    # Company announcement links redirect to PDF. Skip before
+                    # page.goto() so redirect timeouts never block the loop.
+                    if should_skip_article_detail(item):
+                        skipped_announcements += 1
+                        print(f"[scrape] Skip (announcement): {item['title'][:30]}")
+                        continue
+
                     date_prefix = item['date'].replace('/', '-')
                     filename = f"{date_prefix}_{sanitize_filename(item['title'])}.md"
                     filepath = articles_dir / filename
 
                     if filepath.exists():
-                        skipped += 1
-                        continue
+                        if article_file_needs_refresh(filepath, item.get('title', '')):
+                            print(f"[scrape] Refresh (incomplete): {item['title'][:30]}")
+                        else:
+                            skipped += 1
+                            continue
 
                     try:
                         # Use domcontentloaded + short timeout — many field/ links
@@ -492,8 +800,13 @@ async def scrape_listing(stock_code, output_dir=None, fetch_articles=True, fetch
                             print(f"[scrape] Skip (PDF): {item['title'][:30]}")
                             continue
 
-                        # Non-redirecting 10jqka pages need more time for React/image rendering
-                        if '10jqka.com.cn' in final_url:
+                        # Financing/margin articles render their data tables
+                        # asynchronously. Wait for actual visible rows instead
+                        # of saving the temporary loading placeholder.
+                        if needs_dynamic_table_wait(item.get('title', '')):
+                            await _wait_for_dynamic_table(page, item.get('title', ''))
+                        # Other 10jqka pages keep the existing shorter wait.
+                        elif '10jqka.com.cn' in final_url:
                             try:
                                 await page.wait_for_load_state('networkidle', timeout=15000)
                             except Exception:
@@ -555,7 +868,10 @@ async def scrape_listing(stock_code, output_dir=None, fetch_articles=True, fetch
                     except Exception as e:
                         print(f"[scrape] Skip (error): {item['title'][:30]} — {e}")
 
-            print(f"[scrape] Articles: {fetched} fetched, {skipped} skipped (exists)")
+            print(
+                f"[scrape] Articles: {fetched} fetched, {skipped} skipped (exists), "
+                f"{skipped_announcements} skipped (announcement)"
+            )
 
         # --- Build local articles index (after fetch, so new articles are included) ---
         local_set = set()
@@ -578,7 +894,7 @@ async def scrape_listing(stock_code, output_dir=None, fetch_articles=True, fetch
         output_dir.mkdir(parents=True, exist_ok=True)
 
         md_content = parse_listing_to_markdown(data, local_set)
-        md_path = output_dir / f"{data.get('stockCode', stock_code)}_新闻公告_{ts}.md"
+        md_path = output_dir / f"{data.get('stockCode') or stock_code}_新闻公告_{ts}.md"
         md_path.write_text(md_content, encoding="utf-8")
         print(f"[scrape] Listing saved to {md_path}")
 
@@ -589,6 +905,10 @@ async def scrape_listing(stock_code, output_dir=None, fetch_articles=True, fetch
 async def scrape_article(url, stock_code=None, output_dir=None):
     """Scrape a single news article."""
     from playwright.async_api import async_playwright
+
+    if should_skip_article_detail({'url': url}):
+        print("[scrape] Skip (announcement)")
+        return None
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
@@ -602,8 +922,11 @@ async def scrape_article(url, stock_code=None, output_dir=None):
             await browser.close()
             return None
 
+        page_title = await page.title()
+        if needs_dynamic_table_wait(page_title):
+            await _wait_for_dynamic_table(page, page_title)
         # Non-redirecting 10jqka pages need more time for React/image rendering
-        if '10jqka.com.cn' in final_url:
+        elif '10jqka.com.cn' in final_url:
             try:
                 await page.wait_for_load_state('networkidle', timeout=15000)
             except Exception:
@@ -712,9 +1035,24 @@ def main():
     args = parser.parse_args()
 
     if args.mode == "list":
-        md_path = asyncio.run(scrape_listing(
-            args.code, args.output_dir, args.fetch_articles, args.fetch_days
-        ))
+        md_path = None
+        for attempt in range(1, 4):
+            try:
+                md_path = asyncio.run(scrape_listing(
+                    args.code, args.output_dir, args.fetch_articles, args.fetch_days
+                ))
+            except Exception as exc:
+                print(f"[scrape] Attempt {attempt}/3 failed: {exc}")
+
+            if md_path:
+                break
+            if attempt < 3:
+                print(f"[scrape] Retrying listing ({attempt + 1}/3)...")
+                time.sleep(2)
+
+        if not md_path:
+            print("[scrape] Failed after 3 attempts")
+            raise SystemExit(1)
     else:
         md_path = asyncio.run(scrape_article(args.url, args.code, args.output_dir))
 

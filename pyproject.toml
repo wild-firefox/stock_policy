@@ -6,10 +6,26 @@ requires-python = ">=3.12"
 dependencies = [
     "beautifulsoup4>=4.14.3",
     "efinance>=0.5.8",
+    "ipykernel>=7.3.0",
+    "matplotlib>=3.11.1",
+    "numpy>=2.4.6",
+    "nvidia-cudnn-cu12>=9.24.0.43",
+    "onnxruntime-directml>=1.24.4",
     "openai>=2.40.0",
+    "opencv-python>=5.0.0.93",
     "pandas>=3.0.2",
+    "pandas-market-calendars>=5.4.0",
+    "pillow>=12.3.0",
     "playwright>=1.58.0",
+    "pyautogui>=0.9.54",
+    "pywinauto>=0.6.9",
+    "rapidocr-onnxruntime>=1.4.4",
     "requests>=2.33.1",
+    "scipy>=1.18.0",
+    "seaborn>=0.13.2",
+    "tables>=3.11.1",
+    "tabulate>=0.10.0",
+    "tushare>=1.4.29",
 ]
 
 [project.optional-dependencies]
@@ -19,6 +35,7 @@ dev = [
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
+testpaths = ["test"]
 
 [dependency-groups]
 dev = [

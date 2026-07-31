@@ -15,6 +15,8 @@ import json
 import argparse
 import pandas as pd
 from datetime import datetime, timedelta
+# pyrefly: ignore [missing-import]
+from recalc_qfq import recalc_all_qfq as _recalc_all_qfq
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config import (
@@ -30,13 +32,13 @@ def get_all_stocks(pro):
     df_l = pro.stock_basic(exchange='', list_status='L', fields='ts_code,symbol,name,market,list_date')
     ## 回测中退市的也要保存,防止未来函数。
     df_d = pro.stock_basic(exchange='', list_status='D', fields='ts_code,symbol,name,market,list_date,delist_date') # 退市
-    
+
     df = pd.concat([df_l, df_d], ignore_index=True)
-    
+
     # 过滤指定板块，并且强制要求 ts_code 前6位是纯数字
     df = df[df['market'].isin(['主板', '创业板', '科创板', '北交所'])].copy()
     df = df[df['ts_code'].str[:6].str.isdigit()].copy()
-    
+
     return df
 
 
@@ -74,7 +76,7 @@ def save_csv(df, ts_code):
     return True
 
 
-from recalc_qfq import recalc_all_qfq as _recalc_all_qfq
+
 
 
 def save_incremental(df_new, ts_code, do_recalc=False):

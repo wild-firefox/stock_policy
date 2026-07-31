@@ -1,6 +1,7 @@
 """
 配置文件 — 使用前将其复制一份为config.py并填入你的 API Token
 """
+from tkinter import NO
 import os
 import logging
 from datetime import datetime
@@ -10,9 +11,28 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent
 
 # ============ API Token 配置 ============
-TUSHARE_TOKEN = os.environ.get("TUSHARE_TOKEN", "YOUR_TUSHARE_TOKEN")
-BOCHA_API_KEY = os.environ.get("BOCHA_API_KEY", "YOUR_BOCHA_API_KEY")
-DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "YOUR_DEEPSEEK_API_KEY")
+TUSHARE_TOKEN = os.environ.get("TUSHARE_TOKEN", "API_KEY")
+DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "API_KEY") # 官网获取
+
+## 可选 新闻 博查（不建议使用）
+BOCHA_API_KEY = os.environ.get("BOCHA_API_KEY", "API_KEY")
+
+## 可选 实时数据 TICKFLOW （可不用，已平替）
+TICKFLOW_API_KEY = os.environ.get("TICKFLOW_API_KEY","API_KEY") # 官网获取
+## 可选 Notion发布网页
+NOTION_TOKEN = os.environ.get("NOTION_TOKEN", "API_KEY")  # https://app.notion.com/developers 中创建连接获取
+NOTION_PAGE_ID = os.environ.get("NOTION_PAGE_ID", 'PAGE_ID')  # 点击分享页面后 '?'前的一串数字
+## 可选 Notion 私人数据 （私人数据 建议直接在 private_data\data 下存放md文件）
+NOTION_PRIVATE_PAGE_ID = os.environ.get("NOTION_PRIVATE_PAGE_ID","PAGE_ID")
+
+## 可选 获取个人仓位 （ths远航版的个人仓位识别）
+AIHUBMIX_API_KEY = os.environ.get("AIHUBMIX_API_KEY", "API_KEY") # OPENAI 格式 aihubmix 供应商 ，gemini-3.1-flash-image,4o识图能力都可以。
+THS_WINDOW_TITLE = os.environ.get("THS_WINDOW_TITLE", ".*证券公司.*") # 个人注册的证券名：如 ".*东北证券.*" ; ".*国金证券.*"
+
+# ============ 代理配置 ============
+PROXY_URL = os.environ.get("PROXY_URL", "http://[IP_ADDRESS]")
+
+
 
 # ============ 统一全局数据存储路径 ============
 DATA_DIR = PROJECT_ROOT / "data_manager" / "data"
@@ -31,7 +51,7 @@ NEWS_BOCHA_DIR = PROJECT_ROOT / "news_manager" / "data" / "stk" / "raw_Bocha"
 NEWS_JYGS_DIR = PROJECT_ROOT / "news_manager" / "data" / "jygs" / "pqjy"
 
 # 股票列表路径
-A_SHARES_LIST_CSV = PROJECT_ROOT / "a_shares_list.csv"
+A_SHARES_LIST_CSV = PROJECT_ROOT / "a_shares_list.csv"  # 运行 export_all_stocks.py 获取
 
 # ============ 初始化目录 ============
 def init_dirs():
@@ -45,16 +65,23 @@ API_SLEEP = 0.3          # 正常请求间隔（秒）
 RATE_LIMIT_SLEEP = 30    # 触发频率限制后等待（秒）
 MAX_RETRY = 3            # 单只股票最大重试次数
 
+# 预测、复盘和统计报告共用的输出规则。修改规则时只需维护这一处。
+PREDICTION_OUTPUT_RULES = """1.【xx方向】涨 (或者 跌/平)只允许这三个。
+2.涨跌幅区间：【禁止伪精度】除非涨跌幅由明确公式计算得到，否则所有预测涨跌幅只能使用整数%或0.5%步长(如-5%,-4.5%,4.5%,5%)。禁止出现任何其它小数形式(如1.3%,1.7%,2.8%,4.2%全部禁止)。
+3.信心打分(0-10,整数)
+4.理由为你的核心逻辑，理由要明确主谓宾"""
+
 def get_pro():
     import tushare as ts
-    ts.set_token(TUSHARE_TOKEN)
-    return ts.pro_api()
+    # 直接传入 Token，避免多进程反复读写用户目录下的共享 Token 文件。
+    return ts.pro_api(TUSHARE_TOKEN)
 
 
 
 # ============ 日志 ============
 def setup_logger(name="fetch"):
     os.makedirs(LOG_DIR, exist_ok=True)
+
     log_file = LOG_DIR / f"{name}_{datetime.now().strftime('%Y-%m-%d')}.log"
 
     logger = logging.getLogger(name)
