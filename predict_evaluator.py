@@ -322,13 +322,14 @@ def _update_stats(stats, pred, actual_str, result_flag):
         else:
             actual_dir = "平"
 
-        # “平算胜/平算负”给出中性预测的胜率上下界：
-        # 预测为平时，上界全部计正确，下界全部计错误；
-        # 预测为涨/跌时，两种口径都按严格方向判定。
-        if pred_val == "平":
+        # 固定业务口径：平算胜时把“平”映射为“涨”，
+        # 平算负时把“平”映射为“跌”，再与实际方向比较。
+        mapped_pred_win = "涨" if pred_val == "平" else pred_val
+        if mapped_pred_win == actual_dir:
             category_stats['flat_as_win_correct'] += 1
-        elif pred_val == actual_dir:
-            category_stats['flat_as_win_correct'] += 1
+
+        mapped_pred_loss = "跌" if pred_val == "平" else pred_val
+        if mapped_pred_loss == actual_dir:
             category_stats['flat_as_loss_correct'] += 1
 
         # 排除平 (只统计预测胜负)

@@ -2,6 +2,10 @@
 
 A 股量化投研工具链，覆盖行情数据、前复权指标、多股回测、新闻采集、AI 预测、到期复盘与历史评估。
 
+## 在线预测展示
+
+> [查看 Stock Policy 在线预测、复盘与历史统计](https://wild-firefox.pollux-ltda.cl/article/predict_agent)
+
 > 本项目仅用于数据研究和工程实验，不构成投资建议。AI 输出、回测收益和历史胜率都不代表未来表现。
 
 ## 本次 public 版本相对上一版的主要变化
@@ -39,7 +43,7 @@ A 股量化投研工具链，覆盖行情数据、前复权指标、多股回测
 6. **新增的辅助工具**
    - 新增单股近8个季度财务指标和自由现金流趋势函数。
    - 新增 Windows 同花顺远航版持仓 OCR/视觉识别工具（可选、实验性）。
-   - `config.example.py` 现在由专用脚本从 `config.py` 生成，仅替换私密默认值。
+   - 提供经过脱敏的 `config.example.py`；本地配置和生成脚本不进入公开分支。
 
 ---
 
@@ -100,17 +104,6 @@ cp config.example.py config.py
 | `PROXY_URL` | Notion 等外部请求代理 | 可选 |
 
 `config.py`、预测档案、行情数据、新闻数据、持仓 JSON 和回测日志均已在 `.gitignore` 中排除。不要把真实密钥填回 `config.example.py`。
-
-### 2.2 维护 `config.example.py`
-
-修改 `config.py` 的配置结构后，运行：
-
-```bash
-uv run python generate_config_example.py
-uv run python generate_config_example.py --check
-```
-
-生成器会复制 `config.py` 的其余内容，把 API Key/Token、Notion 页面 ID、代理地址和交易窗口标题替换为占位符。如果新增了未处理的敏感环境变量，脚本会直接报错。
 
 ## 3. 数据下载与前复权处理
 
@@ -335,7 +328,6 @@ stock_policy/
 ├── position_manager.py               # Windows 持仓 OCR/视觉识别
 ├── agent_trader_plan.py              # 实验性条件交易计划
 ├── config.example.py                 # 脱敏配置模板
-├── generate_config_example.py        # 配置模板生成器
 ├── news_manager/                     # 新闻爬虫
 ├── tushare_tools/                    # 高频数据与财务工具
 ├── data_manager/

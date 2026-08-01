@@ -124,7 +124,7 @@ def test_run_evaluation_writes_reference_kb_as_hidden_comment(
     )
 
 
-def test_direction_rates_support_flat_as_win_and_flat_as_loss():
+def test_direction_rates_map_flat_to_up_for_win_and_down_for_loss():
     stats = predict_evaluator._new_stats()
 
     predict_evaluator._update_stats(
@@ -137,14 +137,17 @@ def test_direction_rates_support_flat_as_win_and_flat_as_loss():
         stats, {"category": "direction", "value": "平"}, "实际方向: 涨", "[错]"
     )
     predict_evaluator._update_stats(
+        stats, {"category": "direction", "value": "平"}, "实际方向: 跌", "[错]"
+    )
+    predict_evaluator._update_stats(
         stats, {"category": "direction", "value": "涨"}, "实际方向: 跌", "[错]"
     )
 
     rates = predict_evaluator._direction_rates(stats)
 
-    assert rates["strict"] == (2, 4, 50.0)
-    assert rates["flat_as_win"] == (3, 4, 75.0)
-    assert rates["flat_as_loss"] == (1, 4, 25.0)
+    assert rates["strict"] == (2, 5, 40.0)
+    assert rates["flat_as_win"] == (2, 5, 40.0)
+    assert rates["flat_as_loss"] == (2, 5, 40.0)
 
 
 def test_recent_prediction_dates_use_latest_five_dates_present_in_records():
@@ -285,13 +288,13 @@ def test_run_evaluation_writes_global_and_recent_five_prediction_dates(
         tmp_path / "experience" / "predict_eval_history.md"
     ).read_text(encoding="utf-8")
     assert "预测胜率全局统计" in report
-    assert "方向胜率（平算胜）**: 100.0% (6/6)" in report
+    assert "方向胜率（平算胜）**: 0.0% (0/6)" in report
     assert "方向胜率（平算负）**: 0.0% (0/6)" in report
     assert (
         "最近5个预测日胜率统计（2026-06-19 ~ 2026-06-24）"
         in report
     )
-    assert "方向胜率（平算胜）**: 100.0% (5/5)" in report
+    assert "方向胜率（平算胜）**: 0.0% (0/5)" in report
     assert "按已经产生实际方向结果的一日预测目标日期" in report
     assert (
         "<!-- 参考复盘知识库版本: predict_ex_20260618_120000.md -->"
