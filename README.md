@@ -4,7 +4,9 @@ A 股量化投研工具链，覆盖行情数据、前复权指标、多股回测
 
 ## 在线预测展示
 
-> [查看 Stock Policy 在线预测、复盘与历史统计](https://wild-firefox.pollux-ltda.cl/article/predict_agent)
+> 主网址：[查看 Stock Policy 在线预测、复盘与历史统计](https://wild-firefox.pollux-ltda.cl/article/predict_agent)
+>
+> 备用网址：[查看 Stock Policy 在线预测、复盘与历史统计](https://wild-firefox.pollux-ltda.cl/article/predict_agent)
 
 > 本项目仅用于数据研究和工程实验，不构成投资建议。AI 输出、回测收益和历史胜率都不代表未来表现。
 
